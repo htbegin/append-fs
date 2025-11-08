@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L
 #define FUSE_USE_VERSION 35
 
 #include "appendfs.h"
@@ -13,6 +14,8 @@
 #include <string.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 struct afs_config {
     char *store_path;
@@ -137,7 +140,7 @@ static int afs_readdir_cb(const char *name, const struct appendfs_inode_info *in
     st.st_uid = ctx->uid;
     st.st_gid = ctx->gid;
     st.st_ino = info->inode_id;
-    if (ctx->filler(ctx->buf, name, &st, 0, ctx->flags) != 0) {
+    if (ctx->filler(ctx->buf, name, &st, 0, (enum fuse_fill_dir_flags)ctx->flags) != 0) {
         return 1;
     }
     return 0;
@@ -159,7 +162,7 @@ static int afs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_
     if (afs_fill_stat(path, &current) == -1) {
         return -errno;
     }
-    filler(buf, ".", &current, 0, flags);
+    filler(buf, ".", &current, 0, (enum fuse_fill_dir_flags)flags);
 
     struct stat parent = current;
     if (strcmp(path, "/") != 0) {
@@ -179,7 +182,7 @@ static int afs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_
         }
         free(tmp);
     }
-    filler(buf, "..", &parent, 0, flags);
+    filler(buf, "..", &parent, 0, (enum fuse_fill_dir_flags)flags);
     if (appendfs_iterate_children(afs_context(), path, afs_readdir_cb, &ctx) == -1) {
         return -errno;
     }
@@ -322,7 +325,7 @@ static int afs_write_buf(const char *path, struct fuse_bufvec *buf, off_t off, s
             return -ENOMEM;
         }
         dst.buf[0].mem = tmp;
-        ssize_t copied = fuse_buf_copy(&dst, buf, FUSE_BUF_COPY_ALL);
+        ssize_t copied = fuse_buf_copy(&dst, buf, 0);
         if (copied < 0 || (size_t)copied != len) {
             free(tmp);
             return -EIO;
