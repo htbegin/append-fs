@@ -122,7 +122,7 @@ static int afs_opendir(const char *path, struct fuse_file_info *fi) {
 struct readdir_ctx {
     void *buf;
     fuse_fill_dir_t filler;
-    enum fuse_readdir_flags flags;
+    enum fuse_fill_dir_flags fill_flags;
     uid_t uid;
     gid_t gid;
 };
@@ -140,7 +140,7 @@ static int afs_readdir_cb(const char *name, const struct appendfs_inode_info *in
     st.st_uid = ctx->uid;
     st.st_gid = ctx->gid;
     st.st_ino = info->inode_id;
-    if (ctx->filler(ctx->buf, name, &st, 0, (enum fuse_fill_dir_flags)ctx->flags) != 0) {
+    if (ctx->filler(ctx->buf, name, &st, 0, ctx->fill_flags) != 0) {
         return 1;
     }
     return 0;
@@ -151,10 +151,18 @@ static int afs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_
     (void)offset;
     (void)fi;
     struct fuse_context *fc = fuse_get_context();
+    enum fuse_fill_dir_flags fill_flags = 0;
+#ifdef FUSE_READDIR_PLUS
+    if (flags & FUSE_READDIR_PLUS) {
+#ifdef FUSE_FILL_DIR_PLUS
+        fill_flags |= FUSE_FILL_DIR_PLUS;
+#endif
+    }
+#endif
     struct readdir_ctx ctx = {
         .buf = buf,
         .filler = filler,
-        .flags = flags,
+        .fill_flags = fill_flags,
         .uid = fc->uid,
         .gid = fc->gid,
     };
@@ -162,7 +170,7 @@ static int afs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_
     if (afs_fill_stat(path, &current) == -1) {
         return -errno;
     }
-    filler(buf, ".", &current, 0, (enum fuse_fill_dir_flags)flags);
+    filler(buf, ".", &current, 0, fill_flags);
 
     struct stat parent = current;
     if (strcmp(path, "/") != 0) {
@@ -182,7 +190,7 @@ static int afs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_
         }
         free(tmp);
     }
-    filler(buf, "..", &parent, 0, (enum fuse_fill_dir_flags)flags);
+    filler(buf, "..", &parent, 0, fill_flags);
     if (appendfs_iterate_children(afs_context(), path, afs_readdir_cb, &ctx) == -1) {
         return -errno;
     }
