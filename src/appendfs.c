@@ -1425,14 +1425,6 @@ int appendfs_rename(struct appendfs_context *ctx, const char *from_path, const c
                 return -1;
             }
         }
-        dest->deleted = 1;
-        dest->mtime = time(NULL);
-        if (append_unlink_record(ctx, dest) == -1) {
-            free(to_parent);
-            free(from_norm);
-            free(to_norm);
-            return -1;
-        }
     }
 
     struct rename_child {
@@ -1536,6 +1528,18 @@ int appendfs_rename(struct appendfs_context *ctx, const char *from_path, const c
         free(child->path);
         child->path = child_new_path;
         child->deleted = 0;
+    }
+    if (dest && !dest->deleted) {
+        dest->deleted = 1;
+        dest->mtime = time(NULL);
+        if (append_unlink_record(ctx, dest) == -1) {
+            free(children);
+            free(old_path);
+            free(to_parent);
+            free(from_norm);
+            free(to_norm);
+            return -1;
+        }
     }
     free(children);
     free(old_path);
