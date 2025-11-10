@@ -1430,6 +1430,7 @@ int appendfs_rename(struct appendfs_context *ctx, const char *from_path, const c
     struct rename_child {
         struct appendfs_inode *inode;
         char *new_path;
+        char *old_path;
     };
     struct rename_child *children = NULL;
     size_t child_count = 0;
@@ -1481,6 +1482,19 @@ int appendfs_rename(struct appendfs_context *ctx, const char *from_path, const c
             }
             children[child_count].inode = child;
             children[child_count].new_path = child_new_path;
+            children[child_count].old_path = strdup(child->path);
+            if (!children[child_count].old_path) {
+                free(child_new_path);
+                free(to_parent);
+                for (size_t j = 0; j < child_count; ++j) {
+                    free(children[j].new_path);
+                    free(children[j].old_path);
+                }
+                free(children);
+                free(from_norm);
+                free(to_norm);
+                return -1;
+            }
             child_count++;
         }
     }
@@ -1488,6 +1502,7 @@ int appendfs_rename(struct appendfs_context *ctx, const char *from_path, const c
     if (append_rename_record(ctx, inode, to_norm) == -1) {
         for (size_t j = 0; j < child_count; ++j) {
             free(children[j].new_path);
+            free(children[j].old_path);
         }
         free(children);
         free(to_parent);
@@ -1507,6 +1522,7 @@ int appendfs_rename(struct appendfs_context *ctx, const char *from_path, const c
         return -1;
     }
     char *old_path = inode->path;
+    time_t old_mtime = inode->mtime;
     inode->path = new_path;
     inode->deleted = 0;
     inode->mtime = time(NULL);
@@ -1515,8 +1531,12 @@ int appendfs_rename(struct appendfs_context *ctx, const char *from_path, const c
         char *child_new_path = children[i].new_path;
         if (append_rename_record(ctx, child, child_new_path) == -1) {
             free(child_new_path);
+            for (size_t j = 0; j <= i; ++j) {
+                free(children[j].old_path);
+            }
             for (size_t j = i + 1; j < child_count; ++j) {
                 free(children[j].new_path);
+                free(children[j].old_path);
             }
             free(children);
             free(old_path);
@@ -1530,9 +1550,35 @@ int appendfs_rename(struct appendfs_context *ctx, const char *from_path, const c
         child->deleted = 0;
     }
     if (dest && !dest->deleted) {
+        int dest_prev_deleted = dest->deleted;
+        time_t dest_prev_mtime = dest->mtime;
         dest->deleted = 1;
         dest->mtime = time(NULL);
         if (append_unlink_record(ctx, dest) == -1) {
+            dest->deleted = dest_prev_deleted;
+            dest->mtime = dest_prev_mtime;
+            for (size_t i = 0; i < child_count; ++i) {
+                struct appendfs_inode *child = children[i].inode;
+                char *child_old_path = children[i].old_path;
+                if (!child_old_path) {
+                    continue;
+                }
+                if (append_rename_record(ctx, child, child_old_path) == 0) {
+                    free(child->path);
+                    child->path = child_old_path;
+                    children[i].old_path = NULL;
+                    children[i].new_path = NULL;
+                }
+            }
+            if (append_rename_record(ctx, inode, old_path) == 0) {
+                free(inode->path);
+                inode->path = old_path;
+                inode->mtime = old_mtime;
+                old_path = NULL;
+            }
+            for (size_t i = 0; i < child_count; ++i) {
+                free(children[i].old_path);
+            }
             free(children);
             free(old_path);
             free(to_parent);
@@ -1540,6 +1586,9 @@ int appendfs_rename(struct appendfs_context *ctx, const char *from_path, const c
             free(to_norm);
             return -1;
         }
+    }
+    for (size_t i = 0; i < child_count; ++i) {
+        free(children[i].old_path);
     }
     free(children);
     free(old_path);
